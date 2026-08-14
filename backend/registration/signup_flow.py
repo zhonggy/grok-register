@@ -1453,9 +1453,11 @@ def _try_click_turnstile_frame(log_callback=None):
 
     全链路诊断日志 + 多策略点击：
     1. 遍历 frames 找到 Turnstile frame（日志输出找到/未找到 + frame URL）
-    2. 在 frame 内搜索 checkbox 元素（日志输出尝试了哪些选择器）
-    3. 找到则点击；未找到则走 body 坐标点击 fallback
-    4. frame 内点击失败则尝试 page 级 iframe 坐标点击
+    2. frame 内 JS 精确定位 checkbox / 点击区域，换算为 page 绝对坐标后
+       用原生 mouse 事件点击——Turnstile 的 canvas/overlay 渲染会让
+       frame.click 的 hit-target 检查在 "performing click action" 阶段
+       卡死超时（实测 Frame.click: Timeout），原生 mouse 事件完全绕过该检查
+    3. 找不到元素时回退 iframe 左侧 24px 标准 checkbox 位置坐标点击
     """
     try:
         raw_page = page.raw_page
@@ -1486,10 +1488,92 @@ def _try_click_turnstile_frame(log_callback=None):
     if log_callback:
         log_callback(f"[Debug] Turnstile frame 已定位: {frame_url[:100]}")
 
-    # ---- 策略 1：frame body 坐标点击（Turnstile 实际交互方式）----
-    # Turnstile iframe 内没有 checkbox DOM 元素（inputs=[]），
-    # 交互区域是 canvas/overlay，只能通过坐标点击。
-    # checkbox 标准位置在 iframe 左侧 24px 处。
+    # ---- 定位 iframe 元素，作为 page 坐标换算基准 ----
+    iframe_el = None
+    try:
+        iframe_el = raw_page.query_selector(
+            'iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]'
+        )
+    except Exception:
+        iframe_el = None
+    iframe_box = None
+    if iframe_el is not None:
+        try:
+            iframe_box = iframe_el.bounding_box()
+        except Exception:
+            iframe_box = None
+
+    def _mouse_click(inner_x, inner_y, label):
+        """把 iframe 内 CSS 坐标换算成 page 绝对坐标，用原生 mouse 事件点击。
+
+        frame.click 会先做 hit-target 检查再派发事件，Turnstile 的 overlay
+        会让目标在检查与派发之间变化，导致 "performing click action" 超时；
+        原生 mouse 事件不做任何检查，直接派发真实输入事件，等同人工点击。
+        """
+        nonlocal iframe_box
+        if iframe_box is None or iframe_box["width"] <= 0 or iframe_box["height"] <= 0:
+            if iframe_el is not None:
+                try:
+                    iframe_box = iframe_el.bounding_box()
+                except Exception:
+                    iframe_box = None
+        if iframe_box is None or iframe_box["width"] <= 0 or iframe_box["height"] <= 0:
+            if log_callback:
+                log_callback(f"[Debug] Turnstile iframe 无法定位 page 坐标，跳过 {label}")
+            return False
+        px = iframe_box["x"] + inner_x
+        py = iframe_box["y"] + inner_y
+        try:
+            # 带步进的鼠标移动更接近真人轨迹；click 默认瞬移
+            raw_page.mouse.move(px, py, steps=6)
+            raw_page.mouse.down()
+            raw_page.mouse.up()
+            if log_callback:
+                log_callback(f"[*] 已点击 Turnstile {label} ({px:.0f}, {py:.0f})")
+            return True
+        except Exception as exc:
+            if log_callback:
+                log_callback(f"[Debug] Turnstile 点击失败（{label}）: {exc}")
+            return False
+
+    # ---- 策略 1：frame 内 JS 精确定位 checkbox / 点击区域 ----
+    # Turnstile iframe 内有隐藏的 input[type=checkbox] 与 .cb-* 点击容器，
+    # 点击容器整个区域都绑定 click handler，点中心即可触发。
+    try:
+        box = turnstile_frame.evaluate(
+            """
+() => {
+  const selectors = [
+    'input[type="checkbox"]',
+    '.cb-c', '.cb-m', '.cb-l', '.cb-i',
+    '.rc-anchor-container', '.rc-anchor',
+    '.main-body .main-content',
+    '#challenge-stage',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    return {x: r.x + r.width / 2, y: r.y + r.height / 2, sel};
+  }
+  return null;
+}
+            """
+        )
+        if isinstance(box, dict) and box.get("x") is not None:
+            if log_callback:
+                log_callback(
+                    f"[Debug] Turnstile 定位到点击区域: {box.get('sel')} "
+                    f"({float(box['x']):.0f}, {float(box['y']):.0f})"
+                )
+            if _mouse_click(float(box["x"]), float(box["y"]), "checkbox"):
+                return
+    except Exception as loc_exc:
+        if log_callback:
+            log_callback(f"[Debug] Turnstile 元素定位失败: {loc_exc}")
+
+    # ---- 策略 2：标准位置坐标点击（checkbox 位于 iframe 左侧约 24px）----
     try:
         body_info = turnstile_frame.evaluate(
             """
@@ -1506,39 +1590,11 @@ def _try_click_turnstile_frame(log_callback=None):
             log_callback(
                 f"[Debug] Turnstile frame body: w={bi.get('w', 0):.0f} h={bi.get('h', 0):.0f}"
             )
-
-        if not body_info or body_info.get("w", 0) <= 0:
-            if log_callback:
-                log_callback("[Debug] Turnstile frame body 未渲染好，跳过")
-            return
-
-        click_x = 24
-        click_y = body_info["h"] / 2
-        turnstile_frame.click("body", position={"x": click_x, "y": click_y}, timeout=3000)
+        if body_info and body_info.get("w", 0) > 0:
+            _mouse_click(24, body_info["h"] / 2, "frame body 标准位置")
+    except Exception as body_exc:
         if log_callback:
-            log_callback(f"[*] 已点击 Turnstile frame body ({click_x}, {click_y:.0f})")
-        return
-    except Exception as frame_click_exc:
-        if log_callback:
-            log_callback(f"[Debug] Turnstile frame body 点击失败: {frame_click_exc}")
-
-    # ---- 策略 2：page 级 iframe 元素坐标点击（frame 点击被 CSP 拦截时）----
-    try:
-        iframe_el = raw_page.query_selector(
-            'iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]'
-        )
-        if iframe_el:
-            box = iframe_el.bounding_box()
-            if box and box["width"] > 0:
-                px = box["x"] + 24
-                py = box["y"] + box["height"] / 2
-                raw_page.mouse.click(px, py)
-                if log_callback:
-                    log_callback(f"[*] 已在 page 级点击 Turnstile iframe ({px:.0f}, {py:.0f})")
-                return
-    except Exception as page_click_exc:
-        if log_callback:
-            log_callback(f"[Debug] Turnstile page 级点击失败: {page_click_exc}")
+            log_callback(f"[Debug] Turnstile body 探测失败: {body_exc}")
 
 
 def build_profile():
