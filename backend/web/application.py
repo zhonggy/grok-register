@@ -69,6 +69,8 @@ CONFIG_PUBLIC_KEYS = (
     "outlookemail_pick_mode",
     "outlookemail_disable_after_cpa_success",
     "proxy",
+    "resin_url",
+    "resin_platform_name",
     "enable_nsfw",
     "debug_mode",
     "browser_headless",
@@ -126,6 +128,7 @@ SENSITIVE_HINT_KEYS = {
     "yyds_api_key",
     "yyds_jwt",
     "proxy",
+    "resin_url",
 }
 
 
@@ -379,6 +382,26 @@ def _apply_config_updates(updates: Dict[str, Any]) -> Dict[str, Any]:
             value = str(value or "en-US").strip()
             if value not in {"en-US", "zh-CN"}:
                 value = "en-US"
+        elif key == "resin_url":
+            value = str(value or "").strip()
+            if value:
+                from backend.integrations import resin as _resin
+
+                try:
+                    _resin.validate_resin_url(value)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=400, detail=f"Resin 代理地址格式错误: {exc}"
+                    ) from exc
+        elif key == "resin_platform_name":
+            value = str(value or "Default").strip() or "Default"
+            if not value or not all(
+                char.isalnum() or char in "_-" for char in value
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Resin 平台名只能包含字母、数字、下划线和连字符",
+                )
         elif key == "email_provider":
             value = str(value or "cloudflare").strip().lower() or "cloudflare"
             if value not in {"cloudflare", "duckmail", "yyds", "mailnest", "outlookemail", "cloudmail"}:
@@ -1173,6 +1196,10 @@ def create_app() -> FastAPI:
 
         results: Dict[str, Any] = {}
         errors: Dict[str, str] = {}
+        # Resin：手动导入携带该账号的授权凭据，属于账号流量，按账号身份走 Resin
+        from backend.integrations import resin as _resin
+
+        _resin.set_current_account(str(rows[0].get("email") or "").strip())
         try:
             with Grok2APIClient.from_config(gr.config) as client:
                 for format_name, path in paths.items():
@@ -1190,6 +1217,8 @@ def create_app() -> FastAPI:
                 error=str(exc),
             )
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        finally:
+            _resin.clear_current_account()
         if not results:
             error_text = "; ".join(f"{name}: {error}" for name, error in errors.items())
             store.update_remote_import_status(

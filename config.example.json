@@ -24,6 +24,8 @@
   "outlookemail_top": 10,
   "outlookemail_disable_after_cpa_success": false,
   "proxy": "",
+  "resin_url": "",
+  "resin_platform_name": "Default",
   "enable_nsfw": true,
   "debug_mode": false,
   "browser_headless": false,

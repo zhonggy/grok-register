@@ -401,7 +401,22 @@ export function SettingsPage({ section = "registration" }: { section?: SettingsS
               field="proxy"
               type="password"
               placeholder="http://user:password@host:port"
-              helper="支持无认证或用户名/密码认证的 HTTP(S) 代理；凭据含 @、:、/、#、% 等特殊字符时请使用 URL 百分号编码，例如 @ 写成 %40。注册浏览器与 xAI/OAuth 请求会共用此代理。"
+              helper="支持无认证或用户名/密码认证的 HTTP(S) 代理；凭据含 @、:、/、#、% 等特殊字符时请使用 URL 百分号编码，例如 @ 写成 %40。未配置 Resin 时，注册浏览器与 xAI/OAuth 请求会共用此代理；配置 Resin 后账号流量优先走 Resin。"
+            />
+            <ConfigField
+              {...fieldState}
+              label="Resin 代理地址"
+              field="resin_url"
+              type="password"
+              placeholder="http://127.0.0.1:2260/my-token"
+              helper="Resin 粘性代理池接入地址（含 Token，如 http://127.0.0.1:2260/my-token）。配置后所有涉及具体账号的请求（注册浏览器、SSO 换 token、邮箱、授权上传）都会按账号身份走 Resin；Account 使用注册邮箱（登录前即存在，稳定），浏览器启动阶段使用一次性临时身份并在拿到邮箱后通过 inherit-lease 平滑继承租约。"
+            />
+            <ConfigField
+              {...fieldState}
+              label="Resin 平台名"
+              field="resin_platform_name"
+              placeholder="Default"
+              helper="Resin 的 Platform 字段，用于识别业务身份；只能包含字母、数字、下划线和连字符。"
             />
             <ConfigField {...fieldState}
               label="账号间隔（秒）"

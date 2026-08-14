@@ -145,12 +145,16 @@ class SsoCheckJobCoordinator:
         job_index = {int(item["account_id"]): item for item in seed_items}
 
         def runner() -> None:
+            from backend.integrations import resin as _resin
+
             try:
                 for record in runnable:
                     account_id = int(record.get("id") or 0)
                     email = str(record.get("email") or "").strip()
                     self._set(account_id=account_id, email=email, stage="检查账号风控")
                     try:
+                        # Resin：SSO 检查属于该账号的流量，走账号粘性身份
+                        _resin.set_current_account(email)
                         outcome = self._run_record(record, store)
                     except Exception as exc:
                         outcome = {
@@ -158,6 +162,8 @@ class SsoCheckJobCoordinator:
                             "verdict": "error",
                             "error": str(exc) or exc.__class__.__name__,
                         }
+                    finally:
+                        _resin.clear_current_account()
                     with self._lock:
                         item = job_index[account_id]
                         item.update(outcome)

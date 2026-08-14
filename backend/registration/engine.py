@@ -28,6 +28,7 @@ from curl_cffi import requests
 from backend.integrations import auth_exchange as _s2cpa
 from backend.integrations import grokiq as _grokiq
 from backend.integrations import grok2api_client as _grok2api
+from backend.integrations import resin as _resin
 from backend.integrations import sub2api_client as _sub2api
 from backend.integrations import sso_checker as _sso_checker
 from backend.mailbox import cloudflare_worker as cloudflare_provider
@@ -306,6 +307,10 @@ DEFAULT_CONFIG = {
     "outlookemail_pick_mode": "random",
     "outlookemail_disable_after_cpa_success": False,
     "proxy": "http://127.0.0.1:7890",
+    # Resin 粘性代理池：resin_url 含基础地址与 Token；所有涉及具体账号的
+    # 请求（注册浏览器、SSO 换 token、邮箱、授权上传）按账号身份走 Resin。
+    "resin_url": "",
+    "resin_platform_name": "Default",
     "enable_nsfw": True,
     "debug_mode": False,
     "browser_headless": False,
@@ -798,6 +803,10 @@ DUCKMAIL_API_BASE_DEFAULT = duckmail_provider.API_BASE_DEFAULT
 
 
 def get_proxies():
+    """返回当前线程账号身份对应的 Resin 正向代理；否则回退传统 proxy 配置。"""
+    routed = _resin.current_account_proxy()
+    if routed:
+        return {"http": routed, "https": routed}
     proxy = resolve_proxy_url(config.get("proxy", ""))
     if proxy:
         return {"http": proxy, "https": proxy}
@@ -1218,8 +1227,12 @@ def _normalize_sso_token(raw_token):
     return token
 
 
-def _resolve_cpa_proxy():
-    """CPA 换 token 用的代理：优先 config.proxy，其次环境变量，否则直连。"""
+def _resolve_cpa_proxy(account=""):
+    """SSO 换 token / 风控检查用的代理：优先当前账号的 Resin 正向代理，
+    其次 config.proxy，否则环境变量，最后直连。"""
+    routed = _resin.account_proxy(account)
+    if routed:
+        return routed
     proxy = resolve_proxy_url(config.get("proxy", ""))
     if proxy:
         return proxy
@@ -1332,7 +1345,7 @@ def ensure_sso_oauth_eligible(
             return "unknown"
 
     retry_delays = (0, 2, 4, 8)
-    proxy = _resolve_cpa_proxy()
+    proxy = _resolve_cpa_proxy(email)
     last_state = {}
 
     for attempt, delay in enumerate(retry_delays, start=1):
@@ -1495,7 +1508,8 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
     if not sso:
         _set_result(status="failed", error="SSO 为空")
         return False
-    proxy = _resolve_cpa_proxy()
+    # 账号身份已由注册/重登流程写入线程本地；此处显式传 email 兜底
+    proxy = _resolve_cpa_proxy(email)
 
     def _cpa_log(message):
         if log_callback:
@@ -1511,7 +1525,10 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
             "device_browser": "浏览器 Device Flow",
             "auth_code": "Authorization Code",
         }
-        _cpa_log(f"SSO → {_mode_labels.get(token_mode, token_mode)} 换 token (proxy={proxy}) ...")
+        _cpa_log(
+            f"SSO → {_mode_labels.get(token_mode, token_mode)} 换 token "
+            f"(proxy={_resin.display_proxy(proxy) or '直连'}) ..."
+        )
 
         def _browser_approve(user_code, open_url):
             return authorize_device_in_browser(
@@ -1581,14 +1598,18 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
                 auth_errors.append(f"CPA 本地失败: {local_exc}")
         if remote_url and cpa_upload_enabled:
             try:
-                # CPA 管理端通常是本机或内网服务，远程上传固定直连；
-                # config.proxy 只用于 xAI/Grok 的 SSO→token/Auth 链路。
-                _cpa_log(f"CPA 远程上传网络: 直连 -> {remote_url.rstrip('/')}")
+                # CPA 远程上传携带账号凭据，属于账号流量：有 Resin 时走 Resin，
+                # 否则直连（管理端通常是本机或内网服务）。
+                _cpa_log(
+                    "CPA 远程上传网络: "
+                    + ("Resin 代理" if _resin.account_proxy(email) else "直连")
+                    + f" -> {remote_url.rstrip('/')}"
+                )
                 name = _s2cpa.upload_cpa_auth_remote(
                     remote_url,
                     management_key,
                     record,
-                    proxy="",
+                    proxy=_resin.account_proxy(email),
                 )
                 _cpa_log(f"已上传 CPA 远程 {remote_url.rstrip('/')}/.../{name}")
                 wrote_ok = True
@@ -1622,8 +1643,10 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
                 auth_entries.extend(f"Grok2API {kind}: {path}" for kind, path in gpaths.items())
                 if g2a_remote_configured and g2a_auto_import:
                     _cpa_log(
-                        "Grok2API 远程导入网络: 直连 -> "
-                        f"{str(config.get('grok2api_remote_url') or '').rstrip('/')}"
+                        "Grok2API 远程导入网络: "
+                        + ("Resin 代理" if _resin.current_account_proxy() else "直连")
+                        + " -> "
+                        + f"{str(config.get('grok2api_remote_url') or '').rstrip('/')}"
                     )
                     remote_results = {}
                     remote_errors = {}
@@ -1689,8 +1712,10 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
                     config.get("sub2api_group_ids", "")
                 )
                 _cpa_log(
-                    "[Sub2API] 远程上传网络: 直连 -> "
-                    f"{str(config.get('sub2api_remote_url') or '').rstrip('/')}"
+                    "[Sub2API] 远程上传网络: "
+                    + ("Resin 代理" if _resin.current_account_proxy() else "直连")
+                    + " -> "
+                    + f"{str(config.get('sub2api_remote_url') or '').rstrip('/')}"
                 )
                 with _sub2api.Sub2APIClient.from_config(config) as sub2_client:
                     remote_result = sub2_client.sso_to_oauth(
@@ -1781,9 +1806,14 @@ def add_sso_to_cpa(raw_token, email="", log_callback=None, result_out=None) -> b
 
 def _build_request_kwargs(**kwargs):
     request_kwargs = dict(kwargs)
-    proxies = request_kwargs.pop("proxies", None)
-    # 通用 HTTP 默认直连。只有 xAI/Grok 调用方可以显式传入 get_proxies()。
-    request_kwargs["proxies"] = proxies or {}
+    explicit_proxies = request_kwargs.pop("proxies", None)
+    # 当前线程处于账号流程时，账号流量必须走 Resin（按账号身份）；
+    # 无账号身份时尊重调用方显式传入的 proxies（默认直连）。
+    routed = _resin.current_account_proxy()
+    if routed:
+        request_kwargs["proxies"] = {"http": routed, "https": routed}
+    else:
+        request_kwargs["proxies"] = explicit_proxies or {}
     request_kwargs.setdefault("timeout", 15)
     return request_kwargs
 
@@ -2871,6 +2901,10 @@ def run_registration(count):
             local_success = 0
             local_fail = 0
             local_fail_stats = empty_fail_stats()
+            # Resin：每个 worker 线程一个账号槽位，浏览器启动时邮箱未知，
+            # 先使用一次性临时身份；邮箱就绪后 inherit-lease 继承给邮箱标识。
+            _slot_identity = _resin.new_temp_identity()
+            _resin.set_current_account(_slot_identity)
             try:
                 boot_started_at = time.time()
                 try:
@@ -2895,6 +2929,10 @@ def run_registration(count):
                 i = 0
                 retry = 0
                 while i < n and not controller.should_stop():
+                    # 每个账号槽位换新的临时身份（上轮 finally 已停止浏览器）
+                    if i > 0:
+                        _slot_identity = _resin.new_temp_identity()
+                        _resin.set_current_account(_slot_identity)
                     attempt_started_at = time.time()
                     email = ""
                     profile = {}
@@ -2913,6 +2951,11 @@ def run_registration(count):
                         email, dev_token, submitted_at = fill_email_and_submit(
                             log_callback=lambda m: registration_log(f"[W{wid+1}] {m}"),
                             cancel_callback=controller.should_stop,
+                        )
+                        # Resin：邮箱即账号稳定标识；继承临时身份租约并切换线程身份
+                        _resin.on_email_acquired(
+                            _slot_identity, email,
+                            log_callback=lambda m: registration_log(f"[W{wid+1}] {m}"),
                         )
                         code = fill_code_and_submit(
                             email,
@@ -3138,6 +3181,7 @@ def run_registration(count):
                     )
                 except Exception:
                     pass
+                _resin.clear_current_account()
                 with stats_lock:
                     shared["success"] += local_success
                     shared["fail"] += local_fail
@@ -3163,6 +3207,10 @@ def run_registration(count):
 
     try:
         boot_started_at = time.time()
+        # Resin：浏览器在拿到邮箱前启动，使用一次性临时身份；邮箱就绪后
+        # 通过 inherit-lease 把临时身份的 IP 租约平滑继承给邮箱标识。
+        _slot_identity = _resin.new_temp_identity()
+        _resin.set_current_account(_slot_identity)
         try:
             start_browser(log_callback=registration_log)
         except Exception as boot_exc:
@@ -3182,11 +3230,18 @@ def run_registration(count):
                 )
             return
         registration_log("[*] 浏览器已启动")
+        if _slot_identity:
+            registration_log(f"[Resin] 浏览器临时身份: {_slot_identity}")
         i = 0
         while i < count:
             if controller.should_stop():
                 break
             registration_log(f"--- 开始第 {i + 1}/{count} 个账号 ---")
+            # 每个账号槽位都要换新的临时身份（浏览器已在上轮 finally 停止，
+            # 本轮 open_signup_page 会按新身份惰性启动），防止跨账号共用租约。
+            if i > 0:
+                _slot_identity = _resin.new_temp_identity()
+                _resin.set_current_account(_slot_identity)
             attempt_started_at = time.time()
             email = ""
             profile = {}
@@ -3211,6 +3266,10 @@ def run_registration(count):
                     registration_log("[*] 2. 创建邮箱并提交")
                     email, dev_token, submitted_at = fill_email_and_submit(
                         log_callback=registration_log, cancel_callback=controller.should_stop
+                    )
+                    # Resin：邮箱即账号稳定标识；继承临时身份租约并切换线程身份
+                    _resin.on_email_acquired(
+                        _slot_identity, email, log_callback=registration_log
                     )
                     registration_log(f"[*] 邮箱: {email}")
                     registration_log(f"[Debug] 邮箱 token 已获取 (len={len(str(dev_token or ''))})")
@@ -3483,6 +3542,7 @@ def run_registration(count):
     except Exception as exc:
         registration_log(f"[!] 任务异常: {exc}")
     finally:
+        _resin.clear_current_account()
         try:
             user_stopped = bool(controller.should_stop())
             if user_stopped:

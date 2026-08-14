@@ -244,6 +244,7 @@ class ReloginJobCoordinator:
 
     def _run_record(self, record: Dict[str, Any], store: Any) -> str:
         from backend.automation.session import stop_browser
+        from backend.integrations import resin as _resin
         from backend.registration import engine as gr
         from backend.registration.login_flow import (
             capture_login_diagnostics,
@@ -267,6 +268,8 @@ class ReloginJobCoordinator:
                 self._set(stage="重建授权文件")
 
         try:
+            # Resin：重登浏览器与授权重建都属于该账号的流量，走账号粘性身份
+            _resin.set_current_account(email)
             gr.load_config()
             gr._wire_runtime_modules()
             gr._bs.allow_browser_launches()
@@ -367,6 +370,7 @@ class ReloginJobCoordinator:
                 "traceback": trace_text[-8000:],
             }
         finally:
+            _resin.clear_current_account()
             try:
                 stop_browser(force=True)
             except BaseException:

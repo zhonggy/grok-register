@@ -47,8 +47,14 @@ class Grok2APIClient:
         self.login_timeout = float(login_timeout)
         self.import_timeout = float(import_timeout)
         self._owns_session = session is None
-        # Grok2API 是独立管理服务，不继承项目代理或环境代理。
+        # Grok2API 是独立管理服务，默认不继承项目代理或环境代理；
+        # 但账号导入属于账号流量：当前线程处于账号流程时走该账号的 Resin 正向代理。
         self.session = session or requests.Session(trust_env=False)
+        from backend.integrations import resin as _resin
+
+        _routed = _resin.current_account_proxy()
+        if _routed:
+            self.session.proxies = {"http": _routed, "https": _routed}
         self._access_token = ""
 
     @classmethod

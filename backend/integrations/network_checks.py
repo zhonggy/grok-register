@@ -11,12 +11,14 @@ from typing import Callable, List, Tuple
 from urllib.parse import urlparse
 
 from backend.mailbox import cloudflare_worker as cloudflare_provider
+from backend.integrations import resin as _resin
 from backend.integrations.proxy import redact_proxy_text, resolve_proxy_url
 from backend.shared.paths import resolve_project_path
 
 CheckResult = Tuple[str, bool, str]  # name, ok, detail
 XAI_SIGNUP_CHECK_NAME = "xAI注册页"
 XAI_SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
+RESIN_CHECK_NAME = "Resin代理"
 
 
 def _tcp_open(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -365,9 +367,43 @@ def check_cpa(config: dict, http_get: Callable) -> CheckResult:
     return "CPA", True, "；".join(parts) if parts else "OK"
 
 
+def check_resin(resin_url: str, probe_proxy: str, http_get: Callable) -> CheckResult:
+    """检查 Resin 代理服务连通性与粘性出口。"""
+    if not str(resin_url or "").strip():
+        return RESIN_CHECK_NAME, True, "未配置（账号流量沿用原代理/直连）"
+    try:
+        scheme, netloc, _token = _resin.parse_resin_url(resin_url)
+        server = f"{scheme}://{netloc}"
+        u = urlparse(server)
+        host = u.hostname or "127.0.0.1"
+        port = u.port or (443 if u.scheme == "https" else 80)
+        if not _tcp_open(host, port):
+            return RESIN_CHECK_NAME, False, f"无法连接 {host}:{port}"
+        if not probe_proxy:
+            return RESIN_CHECK_NAME, True, f"{server} 可达（未配置临时身份探测）"
+        try:
+            exit_ip = _trace_exit_ip(
+                http_get, {"http": probe_proxy, "https": probe_proxy}
+            )
+        except Exception as exc:
+            return RESIN_CHECK_NAME, False, f"TCP 通，出站探测失败: {redact_proxy_text(exc)}"
+        if exit_ip:
+            return RESIN_CHECK_NAME, True, f"{server} 可用，粘性出口IP {exit_ip}"
+        return RESIN_CHECK_NAME, True, f"{server} 可用（未解析到出口IP）"
+    except Exception as exc:
+        return RESIN_CHECK_NAME, False, redact_proxy_text(str(exc))
+
+
 def run_connectivity_checks(config: dict, http_get: Callable, http_post: Callable) -> List[CheckResult]:
     results = []
-    proxy = resolve_proxy_url(config.get("proxy", ""))
+    # Resin 已配置时：预检与 xAI 可达性检查都走 Resin 出口（一次性临时身份），
+    # 既验证 Resin 可用，也验证经 Resin 后 xAI 是否被 Cloudflare 拦截。
+    resin_url = str(config.get("resin_url", "") or "").strip()
+    probe_proxy = ""
+    if _resin.resin_enabled(config):
+        probe_proxy = _resin.forward_proxy_url(_resin.new_temp_identity(), config=config)
+    results.append(check_resin(resin_url, probe_proxy, http_get))
+    proxy = probe_proxy or resolve_proxy_url(config.get("proxy", ""))
     results.append(check_proxy(proxy, http_get))
     results.append(check_xai_signup(proxy, http_get))
     results.append(

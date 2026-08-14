@@ -519,11 +519,20 @@ def create_browser_options(unique_profile=True) -> dict:
     if exe_path:
         opts["executable_path"] = exe_path
 
-    # 代理
-    proxies = _proxies()
-    proxy = str(proxies.get("https") or proxies.get("http") or "").strip()
-    if proxy:
-        opts["proxy"] = _build_camoufox_proxy(proxy)
+    # 代理：Resin 粘性代理（按线程当前账号身份）优先；否则回退传统 proxy 配置。
+    # Resin 统一走正向代理：Camoufox 通过 CONNECT 隧道自行完成 TLS 握手，
+    # 引擎层指纹伪装不被破坏。
+    from backend.integrations import resin as _resin
+
+    resin_account = _resin.current_account()
+    resin_proxy = _resin.forward_proxy_parts(resin_account) if resin_account else {}
+    if resin_proxy.get("server"):
+        opts["proxy"] = resin_proxy
+    else:
+        proxies = _proxies()
+        proxy = str(proxies.get("https") or proxies.get("http") or "").strip()
+        if proxy:
+            opts["proxy"] = _build_camoufox_proxy(proxy)
 
     # 扩展（Camoufox 使用 addons 参数，加载已解压的 Firefox 扩展目录）
     # 默认会附带 uBlock；若缓存损坏则自动 exclude，避免 manifest.json missing。
@@ -600,9 +609,15 @@ def start_browser(log_callback=None) -> Tuple[object, object]:
                 log_callback(f"[*] 浏览器语言: {opts['locale']}")
                 proxy_options = opts.get("proxy") if isinstance(opts.get("proxy"), dict) else {}
                 proxy_server = str(proxy_options.get("server") or "").strip()
-                log_callback(
-                    f"[*] Camoufox 网络: {'代理 ' + proxy_server if proxy_server else '直连（未配置代理）'}"
-                )
+                proxy_user = str(proxy_options.get("username") or "").strip()
+                if proxy_server and proxy_user:
+                    log_callback(
+                        f"[*] Camoufox 网络: Resin 粘性代理 {proxy_server}（账号 {proxy_user}）"
+                    )
+                elif proxy_server:
+                    log_callback(f"[*] Camoufox 网络: 代理 {proxy_server}")
+                else:
+                    log_callback("[*] Camoufox 网络: 直连（未配置代理）")
             if log_callback and profile_dir:
                 log_callback(f"[Debug] 当前浏览器资料目录: {profile_dir}")
             if log_callback and attempt > 1:

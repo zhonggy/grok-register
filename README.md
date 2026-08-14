@@ -213,6 +213,8 @@ Windows 启动：
 | `register_count` | 注册数量 |
 | `register_workers` | 并发数量，默认 1 |
 | `proxy` | 注册和 OAuth 请求使用的 HTTP(S) 代理；支持 `http://host:port` 和 `http://user:password@host:port`，凭据中的特殊字符需使用 URL 百分号编码 |
+| `resin_url` | Resin 粘性代理池接入地址（含 Token），如 `http://127.0.0.1:2260/my-token`；配置后所有涉及具体账号的请求（注册浏览器、SSO 换 token、邮箱、授权上传）按账号身份走 Resin |
+| `resin_platform_name` | Resin 的 Platform 字段（默认 `Default`），用于识别业务身份；只能包含字母、数字、下划线和连字符 |
 | `browser_headless` | 本机无头模式；Docker 中强制关闭 |
 | `cpa_auto_add` | 注册后生成 CPA 授权 |
 | `sso_detailed_risk_check` | 获取 SSO 后详细检查账号页；`botFlagSource=0` 正常，非 `0` 异常，缺失时自动重试 |
@@ -232,6 +234,15 @@ Windows 启动：
 统一 Compose 中，`GROKIQ_REGISTER_PROBE_STABILIZATION_SECONDS` 控制 GrokIQ 收到新账号事件后等待多久再创建首次探针，默认 `15` 秒，设为 `0` 可关闭等待。
 
 配置模板见 [`config.example.json`](config.example.json)。
+
+## Resin 粘性代理接入
+
+本项目已接入 [Resin](https://github.com/zhonggy/grok-register) 外部粘性代理池，为每个账号提供稳定的出口 IP。
+
+- **统一走正向代理**：本项目所有账号流量都需要保留客户端 TLS 指纹（curl_cffi Chrome 指纹 / Camoufox 引擎层伪装），正向代理通过 CONNECT 隧道保留指纹；反向代理会在 Resin 侧终止 TLS，故不使用。
+- **Account = 注册邮箱（小写）**：邮箱在登录前即存在且稳定，注册、重登、SSO 检查、授权上传全程使用同一标识。
+- **临时身份 + 租约继承**：浏览器在拿到邮箱前启动，先使用一次性临时身份（`temp-*`）；拿到邮箱后自动调用 `POST <resin_url>/api/v1/<PLATFORM>/actions/inherit-lease` 把临时身份的 IP 租约平滑继承给邮箱标识。每个账号槽位都会重新生成临时身份，不会跨账号复用。
+- 在 Web 设置的「注册设置 → Resin 代理地址 / Resin 平台名」中配置；配置后启动任务的连通性检查会验证 Resin 出口。
 
 ## 数据目录
 

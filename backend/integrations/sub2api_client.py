@@ -37,8 +37,14 @@ class Sub2APIClient:
             raise Sub2APIError("Sub2API Admin API Key 为空")
         self.timeout = float(timeout)
         self._owns_session = session is None
-        # Sub2API 是独立管理服务，不继承项目代理或环境代理。
+        # Sub2API 是独立管理服务，默认不继承项目代理或环境代理；
+        # 但 SSO 上传属于账号流量：当前线程处于账号流程时走该账号的 Resin 正向代理。
         self.session = session or requests.Session(trust_env=False)
+        from backend.integrations import resin as _resin
+
+        _routed = _resin.current_account_proxy()
+        if _routed:
+            self.session.proxies = {"http": _routed, "https": _routed}
 
     @classmethod
     def from_config(
