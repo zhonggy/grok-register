@@ -147,6 +147,51 @@ def has_blocking_xai_failure(results: List[CheckResult]) -> bool:
     return any(name == XAI_SIGNUP_CHECK_NAME and not ok for name, ok, _ in results)
 
 
+# curl_cffi 经代理出站失败时的典型文案；命中说明是「出口/代理暂不可用」，
+# 等待后重试有意义。
+_RETRYABLE_PROXY_MARKERS = (
+    "connect tunnel failed",
+    "tunnel",
+    "connection refused",
+    "connection reset",
+    "timed out",
+    "timeout",
+    "couldn't connect",
+    "could not connect",
+    "proxy connect aborted",
+    "502",
+    "503",
+    "504",
+    "empty reply",
+    "resolve",
+)
+# 真被目标站点 Cloudflare 拦截的文案：换 IP 才有意义，重试无意义。
+_UNRETRYABLE_CF_MARKERS = (
+    "just a moment",
+    "checking your browser",
+    "__cf_chl",
+    "cf-error",
+    "cloudflare 拦截",
+    "仍停留在 cloudflare 挑战页",
+)
+
+
+def failure_is_retryable(name: str, detail: str) -> bool:
+    """预检失败是否属于「出口/代理临时不可用」，可等待后自动重试。
+
+    代理 CONNECT 502 / 超时 / 连接重置等属于临时故障，Resin 池恢复后
+    重试即可成功；而目标站点返回 403/429 或 Cloudflare 挑战页属于
+    出口 IP 被拉黑/不受信任，重试无意义，必须更换 IP。
+    """
+    text = str(name or "").lower()
+    detail_text = str(detail or "").lower()
+    if any(marker in detail_text for marker in _UNRETRYABLE_CF_MARKERS):
+        return False
+    if any(marker in detail_text for marker in _RETRYABLE_PROXY_MARKERS):
+        return True
+    return False
+
+
 def check_email_api(provider: str, config: dict, http_get: Callable, http_post: Callable) -> CheckResult:
     provider = (provider or "").strip().lower()
     try:

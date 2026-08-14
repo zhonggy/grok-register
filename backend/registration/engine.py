@@ -2835,8 +2835,63 @@ def run_registration(count):
         for name, ok, detail in startup_checks:
             registration_log(f"[检查] [{'OK' if ok else 'FAIL'}] {name}: {detail}")
         if _conn.has_blocking_xai_failure(startup_checks):
-            registration_log("[!] xAI 注册页被 Cloudflare 拦截，已停止建号；请更换当前 proxy 后重试")
-            return
+            # Resin/代理出口临时不可用（CONNECT 502、超时、连接重置）时自动退避重试；
+            # 真被 Cloudflare 拦截（403/Just a moment）则停止，等待更换出口 IP。
+            blocked_detail = next(
+                (
+                    detail
+                    for name, ok, detail in startup_checks
+                    if name == _conn.XAI_SIGNUP_CHECK_NAME and not ok
+                ),
+                "",
+            )
+            if _conn.failure_is_retryable(_conn.XAI_SIGNUP_CHECK_NAME, blocked_detail):
+                recovered = False
+                for attempt, delay in enumerate((30, 60, 120), start=1):
+                    if controller.should_stop():
+                        break
+                    registration_log(
+                        f"[!] xAI 预检失败（出口暂不可用），{delay}s 后自动重试 "
+                        f"（{attempt}/3）..."
+                    )
+                    try:
+                        sleep_with_cancel(delay, controller.should_stop)
+                    except RegistrationCancelled:
+                        break
+                    startup_checks = _conn.run_connectivity_checks(
+                        config, http_get, http_post
+                    )
+                    for name, ok, detail in startup_checks:
+                        registration_log(
+                            f"[检查] [{'OK' if ok else 'FAIL'}] {name}: {detail}"
+                        )
+                    if not _conn.has_blocking_xai_failure(startup_checks):
+                        recovered = True
+                        break
+                    blocked_detail = next(
+                        (
+                            detail
+                            for name, ok, detail in startup_checks
+                            if name == _conn.XAI_SIGNUP_CHECK_NAME and not ok
+                        ),
+                        "",
+                    )
+                    if not _conn.failure_is_retryable(
+                        _conn.XAI_SIGNUP_CHECK_NAME, blocked_detail
+                    ):
+                        break
+                if not recovered and _conn.has_blocking_xai_failure(startup_checks):
+                    registration_log(
+                        "[!] xAI 注册页预检多次失败，已停止建号；"
+                        "请检查 Resin 池子出口 IP / 配额，或更换代理后重试"
+                    )
+                    return
+            else:
+                registration_log(
+                    "[!] xAI 注册页被 Cloudflare 拦截，已停止建号；"
+                    "请更换当前 proxy 后重试"
+                )
+                return
     except Exception as exc:
         registration_log(f"[!] 启动连通性检查异常，继续注册: {exc}")
 
