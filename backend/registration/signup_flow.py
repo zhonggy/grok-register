@@ -1489,19 +1489,66 @@ def _try_click_turnstile_frame(log_callback=None):
         log_callback(f"[Debug] Turnstile frame 已定位: {frame_url[:100]}")
 
     # ---- 定位 iframe 元素，作为 page 坐标换算基准 ----
-    iframe_el = None
-    try:
-        iframe_el = raw_page.query_selector(
-            'iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]'
-        )
-    except Exception:
-        iframe_el = None
+    # 优先用 Playwright 的 frame.frame_element()：直接从 Frame 对象拿它对应的
+    # iframe 元素（CDP 层对应关系，不受 shadow DOM / 选择器限制），再取
+    # bounding_box 得到 iframe 在 page 中的位置。
     iframe_box = None
-    if iframe_el is not None:
+    try:
+        frame_el = turnstile_frame.frame_element()
+        if frame_el is not None:
+            iframe_box = frame_el.bounding_box()
+    except Exception:
+        iframe_box = None
+    if iframe_box is None or iframe_box["width"] <= 0 or iframe_box["height"] <= 0:
+        # 备选：JS 递归定位（穿透 open shadow DOM），按 src 匹配 Turnstile iframe
         try:
-            iframe_box = iframe_el.bounding_box()
+            frame_rect = raw_page.evaluate(
+                """
+() => {
+  const wanted = (el) => {
+    const src = String(el.src || '');
+    return src.includes('challenges.cloudflare.com') || src.toLowerCase().includes('turnstile');
+  };
+  const find = (root) => {
+    for (const el of root.querySelectorAll('iframe')) {
+      if (wanted(el)) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) return {x: r.x, y: r.y, w: r.width, h: r.height};
+      }
+    }
+    for (const el of root.querySelectorAll('*')) {
+      if (el.shadowRoot) {
+        const found = find(el.shadowRoot);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  return find(document);
+}
+                """
+            )
+            if isinstance(frame_rect, dict) and frame_rect.get("w", 0) > 0:
+                iframe_box = {
+                    "x": float(frame_rect["x"]),
+                    "y": float(frame_rect["y"]),
+                    "width": float(frame_rect["w"]),
+                    "height": float(frame_rect["h"]),
+                }
         except Exception:
             iframe_box = None
+    if iframe_box is None or iframe_box["width"] <= 0 or iframe_box["height"] <= 0:
+        if log_callback:
+            log_callback(
+                f"[Debug] Turnstile iframe page 坐标定位失败"
+                f"（frame_element/shadow 穿透均无效），尝试 frame 内直接点击"
+            )
+    elif log_callback:
+        log_callback(
+            f"[Debug] Turnstile iframe page 坐标: "
+            f"x={iframe_box['x']:.0f} y={iframe_box['y']:.0f} "
+            f"w={iframe_box['width']:.0f} h={iframe_box['height']:.0f}"
+        )
 
     def _mouse_click(inner_x, inner_y, label):
         """把 iframe 内 CSS 坐标换算成 page 绝对坐标，用原生 mouse 事件点击。
@@ -1512,15 +1559,36 @@ def _try_click_turnstile_frame(log_callback=None):
         """
         nonlocal iframe_box
         if iframe_box is None or iframe_box["width"] <= 0 or iframe_box["height"] <= 0:
-            if iframe_el is not None:
-                try:
-                    iframe_box = iframe_el.bounding_box()
-                except Exception:
-                    iframe_box = None
-        if iframe_box is None or iframe_box["width"] <= 0 or iframe_box["height"] <= 0:
-            if log_callback:
-                log_callback(f"[Debug] Turnstile iframe 无法定位 page 坐标，跳过 {label}")
-            return False
+            # 直接尝试 frame 内原生点击：FrameLocator 的 mouse 事件经 CDP 派发，
+            # 不依赖 page 坐标换算。
+            try:
+                turnstile_frame.evaluate(
+                    """
+(x, y) => {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const opts = {bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy};
+  el.dispatchEvent(new MouseEvent('pointerdown', {...opts, pointerId: 1, isPrimary: true}));
+  el.dispatchEvent(new MouseEvent('mousedown', opts));
+  el.dispatchEvent(new MouseEvent('pointerup', {...opts, pointerId: 1, isPrimary: true}));
+  el.dispatchEvent(new MouseEvent('mouseup', opts));
+  el.dispatchEvent(new MouseEvent('click', opts));
+  return true;
+}
+                    """,
+                    inner_x,
+                    inner_y,
+                )
+                if log_callback:
+                    log_callback(f"[Debug] 已在 Turnstile frame 内派发点击事件 ({inner_x:.0f}, {inner_y:.0f})")
+                return True
+            except Exception as exc:
+                if log_callback:
+                    log_callback(f"[Debug] Turnstile frame 内点击失败（{label}）: {exc}")
+                return False
         px = iframe_box["x"] + inner_x
         py = iframe_box["y"] + inner_y
         try:
@@ -1547,8 +1615,9 @@ def _try_click_turnstile_frame(log_callback=None):
     'input[type="checkbox"]',
     '.cb-c', '.cb-m', '.cb-l', '.cb-i',
     '.rc-anchor-container', '.rc-anchor',
-    '.main-body .main-content',
+    '.main-body', '.main-content',
     '#challenge-stage',
+    'button', '[role="checkbox"]',
   ];
   for (const sel of selectors) {
     const el = document.querySelector(sel);
