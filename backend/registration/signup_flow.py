@@ -1395,6 +1395,47 @@ try {
 _turnstile_reset_done = False
 
 
+def _turnstile_frame_body_text(max_chars: int = 200) -> str:
+    """读取 Turnstile frame 的 body 文本；找不到返回空串。"""
+    try:
+        raw_page = page.raw_page
+    except Exception:
+        return ""
+    for frame in raw_page.frames:
+        frame_url = str(frame.url or "")
+        if (
+            "challenges.cloudflare.com" in frame_url
+            or "turnstile" in frame_url.lower()
+        ):
+            try:
+                text = frame.evaluate(
+                    "() => { const b = document.body; "
+                    "return b ? (b.innerText || b.textContent || '') : ''; }"
+                )
+            except Exception:
+                return ""
+            normalized = " ".join(str(text or "").split()).strip()
+            return normalized[: max(int(max_chars or 200), 1)]
+    return ""
+
+
+def _turnstile_stuck_on_browser_check() -> bool:
+    """Turnstile 是否卡在浏览器完整性检查（Checking your Browser…）。
+
+    该状态下 frame 内没有 checkbox 可点，盲目点击反而会触发挑战重载
+    循环；应等待其自动通过，或明确报错提示更换出口 IP。
+    """
+    text = _turnstile_frame_body_text().lower()
+    if not text:
+        return False
+    return (
+        "checking your browser" in text
+        or "just a moment" in text
+        or "checking if the site" in text
+        or "验证您的浏览器" in text
+    )
+
+
 def getTurnstileToken(log_callback=None, cancel_callback=None, force_reset=False):
     """获取 Turnstile token（直接点击 + 轮询等待）。
 
@@ -1403,6 +1444,9 @@ def getTurnstileToken(log_callback=None, cancel_callback=None, force_reset=False
     1. 直接通过 raw_page.frames 定位 frame 并坐标点击
     2. 轮询等待 token 出现
     3. 未通过则间隔重试点击
+    4. 检测到卡在「Checking your Browser」浏览器完整性检查时停止盲目
+       点击（点击会触发挑战重载循环），等待自动通过；超时后明确报错
+       提示更换出口 IP
     """
     if active_page() is None:
         raise Exception("页面未就绪，无法执行 Turnstile")
@@ -1411,9 +1455,12 @@ def getTurnstileToken(log_callback=None, cancel_callback=None, force_reset=False
     last_click_round = -100
     TOTAL_ROUNDS = 20
     POLL_INTERVAL = 2.0
+    BROWSER_CHECK_TIMEOUT = 75.0
+    browser_check_since = None
 
     for _ in range(0, TOTAL_ROUNDS):
         raise_if_cancelled(cancel_callback)
+        token = ""
         try:
             token = page.run_js(
                 """
@@ -1427,27 +1474,49 @@ try {
 } catch(e) { return ''; }
                 """
             )
-            token = str(token or "").strip()
-            if len(token) >= 80:
-                if log_callback:
-                    log_callback(f"[*] Turnstile 已通过，token长度={len(token)}")
-                return token
-
-            # 直接点击（首次或间隔重试）
-            if not click_attempted or (_ - last_click_round >= 4):
-                if not click_attempted:
-                    if log_callback:
-                        log_callback("[*] 尝试点击 Turnstile...")
-                else:
-                    if log_callback:
-                        log_callback("[*] 再次尝试点击 Turnstile...")
-                _try_click_turnstile_frame(log_callback=log_callback)
-                click_attempted = True
-                last_click_round = _
-                sleep_with_cancel(3.0, cancel_callback)
-                continue
         except Exception:
-            pass
+            token = ""
+        token = str(token or "").strip()
+        if len(token) >= 80:
+            if log_callback:
+                log_callback(f"[*] Turnstile 已通过，token长度={len(token)}")
+            return token
+
+        # 浏览器完整性检查：不点击，等待自动通过；超时明确报错
+        if _turnstile_stuck_on_browser_check():
+            now = time.time()
+            if browser_check_since is None:
+                browser_check_since = now
+                if log_callback:
+                    log_callback(
+                        "[!] Turnstile 卡在 Checking your Browser（浏览器完整性检查）；"
+                        "出口 IP 可能被 Cloudflare 判定为可疑，等待自动通过..."
+                    )
+            elif now - browser_check_since > BROWSER_CHECK_TIMEOUT:
+                raise Exception(
+                    "Turnstile 浏览器检查超时；出口 IP 被 Cloudflare 判定为可疑，"
+                    "请更换 Resin 出口 IP / 地区后重试"
+                )
+            sleep_with_cancel(3.0, cancel_callback)
+            continue
+        browser_check_since = None
+
+        # 直接点击（首次或间隔重试）
+        if not click_attempted or (_ - last_click_round >= 4):
+            if not click_attempted:
+                if log_callback:
+                    log_callback("[*] 尝试点击 Turnstile...")
+            else:
+                if log_callback:
+                    log_callback("[*] 再次尝试点击 Turnstile...")
+            try:
+                _try_click_turnstile_frame(log_callback=log_callback)
+            except Exception:
+                pass
+            click_attempted = True
+            last_click_round = _
+            sleep_with_cancel(3.0, cancel_callback)
+            continue
         sleep_with_cancel(POLL_INTERVAL, cancel_callback)
 
     raise Exception("Turnstile 获取 token 失败")
