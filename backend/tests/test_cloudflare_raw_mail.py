@@ -127,3 +127,28 @@ class CloudflareRawMailTests(unittest.TestCase):
         self.assertEqual(combined, "")
         self.assertEqual(subject, "")
         self.assertIsNone(extract_verification_code(combined, subject))
+
+    def test_numeric_code_with_context(self):
+        # xAI 会发送纯数字验证码（如 862-837），主题/正文带 code 关键字时
+        # 应能提取，不再被「必须含字母」过滤掉。
+        self.assertEqual(
+            extract_verification_code(
+                "", "SpaceXAI confirmation code: 862-837"
+            ),
+            "862-837",
+        )
+        self.assertEqual(
+            extract_verification_code(
+                "Your verification code is 862-837, do not share it.", ""
+            ),
+            "862-837",
+        )
+
+    def test_numeric_bare_token_still_rejected(self):
+        # 无 code 上下文的裸纯数字（如正文里的数字范围 100-200）仍拒绝，
+        # 避免误判。
+        self.assertIsNone(extract_verification_code("offer range 100-200 today", ""))
+        self.assertEqual(
+            extract_verification_code("offer range 100-200 today", "Your code: 862-837"),
+            "862-837",
+        )

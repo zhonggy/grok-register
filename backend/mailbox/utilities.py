@@ -133,10 +133,17 @@ def parse_raw_email(raw: str) -> dict:
 
 
 def _match_code(pattern: re.Pattern, source: str) -> Optional[str]:
-    """取第一个含字母的匹配，纯数字串（如 100-200）不是验证码。"""
+    """取第一个验证码匹配。
+
+    带 ``code``/``验证码`` 关键字的上下文正则允许纯数字——xAI 会发送
+    ``862-837`` 这类纯数字验证码（主题形如 ``SpaceXAI confirmation code:
+    862-837``），有 code 关键字做上下文不会与正文噪声混淆；裸 token 匹配
+    仍要求含字母，避免邮件正文里的数字范围（如 ``100-200``）被误判。
+    """
+    allow_numeric = pattern is _CODE_WITH_CONTEXT_RE
     for match in pattern.finditer(source):
         token = match.group(1)
-        if any(ch.isalpha() for ch in token):
+        if allow_numeric or any(ch.isalpha() for ch in token):
             return token
     return None
 
