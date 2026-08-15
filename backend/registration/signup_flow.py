@@ -351,7 +351,7 @@ function nodeText(node) {
         node.getAttribute('aria-label'),
         node.getAttribute('title'),
         node.getAttribute('href'),
-    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
 }
 function scoreEntry(node) {
     // data-testid 不受页面语言影响，最可靠
@@ -581,12 +581,12 @@ function collectText() {
         for (const node of Array.from(document.querySelectorAll(sel)).slice(0, 80)) {
             const style = window.getComputedStyle(node);
             if (style.display === 'none' || style.visibility === 'hidden') continue;
-            const text = (node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim();
+            const text = (node.innerText || node.textContent || '').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
             if (text && text.length >= 8 && text.length <= 400) chunks.push(text);
         }
     }
     const body = (document.body && (document.body.innerText || document.body.textContent) || '')
-        .replace(/\\s+/g, ' ').trim();
+        .replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
     if (body) chunks.push(body.slice(0, 1200));
     return Array.from(new Set(chunks));
 }
@@ -839,7 +839,7 @@ function textOf(node) {
         node.getAttribute('name'),
         node.getAttribute('id'),
         node.getAttribute('autocomplete'),
-    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
 }
 function describeInput(node) {
     return [
@@ -940,7 +940,7 @@ function nodeText(node) {
         node.getAttribute('aria-label'),
         node.getAttribute('title'),
         node.getAttribute('href'),
-    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
 }
 function scoreEntry(node) {
     // data-testid 不受页面语言影响，最可靠
@@ -1041,7 +1041,7 @@ function textOf(node) {
         node.getAttribute('name'),
         node.getAttribute('id'),
         node.getAttribute('autocomplete'),
-    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
 }
 function emailCandidates() {
     const direct = Array.from(document.querySelectorAll('input[data-testid="email"], input[name="email"], input[type="email"], input[autocomplete="email"], input[placeholder*="mail" i], input[aria-label*="mail" i]'));
@@ -2004,13 +2004,13 @@ function buttonText(node) {
         node.getAttribute('value'),
         node.getAttribute('aria-label'),
         node.getAttribute('title'),
-    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
 }
 const buttons = Array.from(document.querySelectorAll('button[type="submit"], button, [role="button"], input[type="submit"]')).filter((node) => {
     return isVisible(node) && !node.disabled && node.getAttribute('aria-disabled') !== 'true';
 });
 const submitBtn = buttons.find((node) => {
-    const t = buttonText(node).replace(/\\s+/g, '').toLowerCase();
+    const t = buttonText(node).replace(/[\\s\u00A0\u200B]+/g, '').toLowerCase();
     const testid = (node.getAttribute('data-testid') || '').toLowerCase();
     if (testid.includes('submit') || testid.includes('signup') || testid.includes('register') || testid.includes('continue')) return true;
     if (t.includes('完成注册') || t.includes('创建账户') || t.includes('signup') || t.includes('createaccount')) return true;
@@ -2067,7 +2067,7 @@ return 'ready-to-submit';
 const buttons = Array.from(document.querySelectorAll('button[type="submit"], button, [role="button"], input[type="submit"]'));
 const btn = buttons.find((node) => {
   const t = [node.innerText, node.textContent, node.value, node.getAttribute('aria-label')]
-    .filter(Boolean).join(' ').replace(/\\s+/g, '').toLowerCase();
+    .filter(Boolean).join(' ').replace(/[\s\u00A0\u200B]+/g, '').toLowerCase();
   const testid = (node.getAttribute('data-testid') || '').toLowerCase();
   if (testid.includes('submit') || testid.includes('signup') || testid.includes('register') || testid.includes('continue')) return true;
   if (t.includes('完成注册') || t.includes('创建账户') || t.includes('signup') || t.includes('createaccount')) return true;
@@ -2119,7 +2119,7 @@ const notices = [];
 for (const selector of selectors) {
   for (const node of document.querySelectorAll(selector)) {
     if (!isVisible(node)) continue;
-    const text = String(node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim();
+    const text = String(node.innerText || node.textContent || '').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
     if (text && text.length <= 800) notices.push(text);
   }
 }
@@ -2139,7 +2139,7 @@ if (/\/sign-up(?:[/?#]|$)/i.test(location.pathname + location.search)) {
     const visibleButtons = Array.from(card.querySelectorAll('button')).filter(isVisible);
     const visibleInputs = Array.from(card.querySelectorAll('input, textarea, select')).filter(isVisible);
     if (description && mailButtons.length === 1 && visibleButtons.length === 1 && visibleInputs.length === 0) {
-      const text = String(card.innerText || card.textContent || '').replace(/\\s+/g, ' ').trim();
+      const text = String(card.innerText || card.textContent || '').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
       signature = {
         matched: true,
         name: 'existing-account-email-login-card',
@@ -2161,7 +2161,7 @@ if (duplicateHeading) {
   let container = duplicateHeading.parentElement;
   let resultText = String(duplicateHeading.innerText || duplicateHeading.textContent || '').trim();
   for (let depth = 0; container && depth < 4; depth += 1, container = container.parentElement) {
-    const text = String(container.innerText || container.textContent || '').replace(/\\s+/g, ' ').trim();
+    const text = String(container.innerText || container.textContent || '').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
     if (text.length >= resultText.length && text.length <= 800) resultText = text;
     if (/login with email|使用邮箱登录/i.test(text) && text.length <= 800) break;
   }
@@ -2482,13 +2482,13 @@ function buttonText(node) {
         node.getAttribute('value'),
         node.getAttribute('aria-label'),
         node.getAttribute('title'),
-    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
 }
 const buttons = Array.from(document.querySelectorAll('button[type="submit"], button, [role="button"], input[type="submit"]')).filter((node) => {
     return isVisible(node) && !node.disabled && node.getAttribute('aria-disabled') !== 'true';
 });
 const submitBtn = buttons.find((node) => {
-    const t = buttonText(node).replace(/\\s+/g, '').toLowerCase();
+    const t = buttonText(node).replace(/[\\s\u00A0\u200B]+/g, '').toLowerCase();
     const testid = (node.getAttribute('data-testid') || '').toLowerCase();
     if (testid.includes('submit') || testid.includes('signup') || testid.includes('register') || testid.includes('continue')) return true;
     if (t.includes('完成注册') || t.includes('创建账户') || t.includes('signup') || t.includes('createaccount')) return true;
@@ -2684,7 +2684,7 @@ function buttonText(node) {
   return [
     node.innerText, node.textContent, node.getAttribute('value'),
     node.getAttribute('aria-label'), node.getAttribute('title'),
-  ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+  ].filter(Boolean).join(' ').replace(/[\\s\u00A0\u200B]+/g, ' ').trim();
 }
 const url = String(location.href || '');
 const bodyText = String(document.body && document.body.innerText || '').slice(0, 4000);
@@ -2701,7 +2701,7 @@ if (url.includes('sign-in') || url.includes('sign-up')) {
 const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], a')).filter(isVisible);
 function findBtn(preds) {
   for (const node of buttons) {
-    const t = buttonText(node).replace(/\\s+/g, '').toLowerCase();
+    const t = buttonText(node).replace(/[\\s\u00A0\u200B]+/g, '').toLowerCase();
     for (const p of preds) {
       if (t.includes(p)) return node;
     }
