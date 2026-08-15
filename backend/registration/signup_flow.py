@@ -56,6 +56,11 @@ CF_WAIT_LOG_INTERVAL = 5.0
 PROFILE_SUBMIT_CONFIRM_TIMEOUT = 12.0
 SSO_WAIT_DEFAULT_TIMEOUT = 90
 
+# Turnstile checkbox 候选横向坐标（iframe 内 CSS 像素）：新版 widget（384px 宽）
+# 布局不固定，多轮点击时轮换候选位置，命中可点击区域即可触发。
+_TURNSTILE_CLICK_X_CANDIDATES = (24, 32, 40, 48, 64, 96, 128, 160, 192)
+_turnstile_click_cursor = 0
+
 _deps: Dict[str, Any] = {}
 _runtime = threading.local()
 
@@ -346,7 +351,7 @@ function nodeText(node) {
         node.getAttribute('aria-label'),
         node.getAttribute('title'),
         node.getAttribute('href'),
-    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
 }
 function scoreEntry(node) {
     // data-testid 不受页面语言影响，最可靠
@@ -354,7 +359,7 @@ function scoreEntry(node) {
     if (testid.includes('email') && (testid.includes('signup') || testid.includes('continue') || testid.includes('register'))) return 100;
     if (testid === 'signup-email' || testid === 'register-email' || testid === 'email-signup') return 100;
 
-    const compact = nodeText(node).replace(/\s+/g, '');
+    const compact = nodeText(node).replace(/\\s+/g, '');
     const lower = compact.toLowerCase();
     // 中文
     if (compact.includes('使用邮箱注册')) return 100;
@@ -496,7 +501,7 @@ function inputMeta(node) {
   return [
     node.name, node.id, node.getAttribute('data-testid'), node.autocomplete,
     node.getAttribute('aria-label'), node.placeholder, ...labels,
-  ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
 }
 const inputs = Array.from(document.querySelectorAll('input')).filter((node) => {
   const type = String(node.type || 'text').toLowerCase();
@@ -507,8 +512,8 @@ const described = inputs.map((node) => ({
   type: String(node.type || 'text').toLowerCase(),
   meta: inputMeta(node),
 }));
-const given = described.find(({ meta }) => /(^|\s|[-_])(given|first)(\s|[-_]?name|$)|given-name|名字|名/.test(meta));
-const family = described.find(({ meta }) => /(^|\s|[-_])(family|last|sur)(\s|[-_]?(name|surname)|$)|family-name|姓/.test(meta));
+const given = described.find(({ meta }) => /(^|\\s|[-_])(given|first)(\\s|[-_]?name|$)|given-name|名字|名/.test(meta));
+const family = described.find(({ meta }) => /(^|\\s|[-_])(family|last|sur)(\\s|[-_]?(name|surname)|$)|family-name|姓/.test(meta));
 const password = described.find(({ type, meta }) => type === 'password' || /password|new-password|密码/.test(meta));
 const code = described.find(({ node, meta }) => {
   const mode = String(node.inputMode || '').toLowerCase();
@@ -518,7 +523,7 @@ const code = described.find(({ node, meta }) => {
 });
 const textInputs = described.filter(({ type }) => ['text', ''].includes(type));
 const bodyText = String(document.body && (document.body.innerText || document.body.textContent) || '')
-  .replace(/\s+/g, ' ').trim().toLowerCase();
+  .replace(/\\s+/g, ' ').trim().toLowerCase();
 const headingMatch = /complete your sign ?up|complete sign ?up|完成.*注册|创建.*账户/.test(bodyText.slice(0, 1200));
 const profileForm = !!password && (
   (!!given && !!family)
@@ -576,12 +581,12 @@ function collectText() {
         for (const node of Array.from(document.querySelectorAll(sel)).slice(0, 80)) {
             const style = window.getComputedStyle(node);
             if (style.display === 'none' || style.visibility === 'hidden') continue;
-            const text = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+            const text = (node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim();
             if (text && text.length >= 8 && text.length <= 400) chunks.push(text);
         }
     }
     const body = (document.body && (document.body.innerText || document.body.textContent) || '')
-        .replace(/\s+/g, ' ').trim();
+        .replace(/\\s+/g, ' ').trim();
     if (body) chunks.push(body.slice(0, 1200));
     return Array.from(new Set(chunks));
 }
@@ -834,7 +839,7 @@ function textOf(node) {
         node.getAttribute('name'),
         node.getAttribute('id'),
         node.getAttribute('autocomplete'),
-    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
 }
 function describeInput(node) {
     return [
@@ -844,7 +849,7 @@ function describeInput(node) {
         `placeholder=${node.getAttribute('placeholder') || ''}`,
         `aria=${node.getAttribute('aria-label') || ''}`,
         `testid=${node.getAttribute('data-testid') || ''}`,
-    ].join(' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+    ].join(' ').replace(/\\s+/g, ' ').trim().slice(0, 160);
 }
 function describeAction(node) {
     return textOf(node).slice(0, 120);
@@ -935,7 +940,7 @@ function nodeText(node) {
         node.getAttribute('aria-label'),
         node.getAttribute('title'),
         node.getAttribute('href'),
-    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
 }
 function scoreEntry(node) {
     // data-testid 不受页面语言影响，最可靠
@@ -943,7 +948,7 @@ function scoreEntry(node) {
     if (testid.includes('email') && (testid.includes('signup') || testid.includes('continue') || testid.includes('register'))) return 100;
     if (testid === 'signup-email' || testid === 'register-email' || testid === 'email-signup') return 100;
 
-    const compact = nodeText(node).replace(/\s+/g, '');
+    const compact = nodeText(node).replace(/\\s+/g, '');
     const lower = compact.toLowerCase();
     // 中文
     if (compact.includes('使用邮箱注册')) return 100;
@@ -1036,7 +1041,7 @@ function textOf(node) {
         node.getAttribute('name'),
         node.getAttribute('id'),
         node.getAttribute('autocomplete'),
-    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
 }
 function emailCandidates() {
     const direct = Array.from(document.querySelectorAll('input[data-testid="email"], input[name="email"], input[type="email"], input[autocomplete="email"], input[placeholder*="mail" i], input[aria-label*="mail" i]'));
@@ -1058,7 +1063,7 @@ if (inputType === 'email' && !input.checkValidity()) return false;
 const buttons = Array.from(document.querySelectorAll('button[type="submit"], button, [role="button"], input[type="submit"]'))
     .filter((node) => isVisible(node) && !node.disabled && node.getAttribute('aria-disabled') !== 'true');
 const submitButton = buttons.find((node) => {
-    const text = textOf(node).replace(/\s+/g, '');
+    const text = textOf(node).replace(/\\s+/g, '');
     const lower = text.toLowerCase();
     return (
         text === '注册' ||
@@ -1136,7 +1141,7 @@ def fill_code_and_submit(
             r"""
 const nodes = Array.from(document.querySelectorAll('button, a, [role="button"]'));
 const target = nodes.find((node) => {
-  const t = (node.innerText || node.textContent || '').replace(/\s+/g, '').toLowerCase();
+  const t = (node.innerText || node.textContent || '').replace(/\\s+/g, '').toLowerCase();
   return t.includes('重新发送') || t.includes('resend') || t.includes('再次发送');
 });
 if (target && !target.disabled) { target.click(); return true; }
@@ -1592,9 +1597,12 @@ def _try_click_turnstile_frame(log_callback=None):
         px = iframe_box["x"] + inner_x
         py = iframe_box["y"] + inner_y
         try:
-            # 带步进的鼠标移动更接近真人轨迹；click 默认瞬移
+            # 带步进的鼠标移动 + 到达后短暂停留 + down/up 间小延迟，
+            # 更接近真人点击节奏；click 默认瞬移太机械。
             raw_page.mouse.move(px, py, steps=6)
+            time.sleep(random.uniform(0.12, 0.35))
             raw_page.mouse.down()
+            time.sleep(random.uniform(0.05, 0.15))
             raw_page.mouse.up()
             if log_callback:
                 log_callback(f"[*] 已点击 Turnstile {label} ({px:.0f}, {py:.0f})")
@@ -1605,8 +1613,8 @@ def _try_click_turnstile_frame(log_callback=None):
             return False
 
     # ---- 策略 1：frame 内 JS 精确定位 checkbox / 点击区域 ----
-    # Turnstile iframe 内有隐藏的 input[type=checkbox] 与 .cb-* 点击容器，
-    # 点击容器整个区域都绑定 click handler，点中心即可触发。
+    # 已知选择器命中则直接点击；全部未命中时 dump frame 内可见元素结构，
+    # 便于诊断新版 Turnstile 的真实布局（checkbox 位置 / 是否有 DOM）。
     try:
         box = turnstile_frame.evaluate(
             """
@@ -1626,7 +1634,26 @@ def _try_click_turnstile_frame(log_callback=None):
     if (r.width <= 0 || r.height <= 0) continue;
     return {x: r.x + r.width / 2, y: r.y + r.height / 2, sel};
   }
-  return null;
+  const dump = [];
+  for (const el of document.querySelectorAll('*')) {
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') continue;
+    const tag = el.tagName.toLowerCase();
+    const cls = (typeof el.className === 'string' && el.className.trim())
+      ? el.className.trim().split(/\\s+/).slice(0, 3).join('.')
+      : '';
+    const text = (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 24);
+    dump.push({
+      tag, cls,
+      x: Math.round(r.x), y: Math.round(r.y),
+      w: Math.round(r.width), h: Math.round(r.height),
+      text,
+    });
+    if (dump.length >= 40) break;
+  }
+  return {dump};
 }
             """
         )
@@ -1638,11 +1665,22 @@ def _try_click_turnstile_frame(log_callback=None):
                 )
             if _mouse_click(float(box["x"]), float(box["y"]), "checkbox"):
                 return
+        if isinstance(box, dict) and isinstance(box.get("dump"), list) and log_callback:
+            parts = []
+            for item in box["dump"][:25]:
+                parts.append(
+                    f"<{item.get('tag')} .{item.get('cls')} "
+                    f"x={item.get('x')} y={item.get('y')} "
+                    f"{item.get('w')}x{item.get('h')} "
+                    f"text={item.get('text')!r}>"
+                )
+            log_callback("[Debug] Turnstile frame 元素结构: " + " ".join(parts))
     except Exception as loc_exc:
         if log_callback:
             log_callback(f"[Debug] Turnstile 元素定位失败: {loc_exc}")
 
-    # ---- 策略 2：标准位置坐标点击（checkbox 位于 iframe 左侧约 24px）----
+    # ---- 策略 2：候选横向坐标依次点击（checkbox 标准位置在 iframe 左侧，
+    # 但新版 384px widget 布局不固定，多轮调用轮换候选位置）----
     try:
         body_info = turnstile_frame.evaluate(
             """
@@ -1660,7 +1698,11 @@ def _try_click_turnstile_frame(log_callback=None):
                 f"[Debug] Turnstile frame body: w={bi.get('w', 0):.0f} h={bi.get('h', 0):.0f}"
             )
         if body_info and body_info.get("w", 0) > 0:
-            _mouse_click(24, body_info["h"] / 2, "frame body 标准位置")
+            global _turnstile_click_cursor
+            candidates = _TURNSTILE_CLICK_X_CANDIDATES
+            click_x = candidates[_turnstile_click_cursor % len(candidates)]
+            _turnstile_click_cursor += 1
+            _mouse_click(click_x, body_info["h"] / 2, f"候选 x={click_x}")
     except Exception as body_exc:
         if log_callback:
             log_callback(f"[Debug] Turnstile body 探测失败: {body_exc}")
@@ -1893,13 +1935,13 @@ function buttonText(node) {
         node.getAttribute('value'),
         node.getAttribute('aria-label'),
         node.getAttribute('title'),
-    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
 }
 const buttons = Array.from(document.querySelectorAll('button[type="submit"], button, [role="button"], input[type="submit"]')).filter((node) => {
     return isVisible(node) && !node.disabled && node.getAttribute('aria-disabled') !== 'true';
 });
 const submitBtn = buttons.find((node) => {
-    const t = buttonText(node).replace(/\s+/g, '').toLowerCase();
+    const t = buttonText(node).replace(/\\s+/g, '').toLowerCase();
     const testid = (node.getAttribute('data-testid') || '').toLowerCase();
     if (testid.includes('submit') || testid.includes('signup') || testid.includes('register') || testid.includes('continue')) return true;
     if (t.includes('完成注册') || t.includes('创建账户') || t.includes('signup') || t.includes('createaccount')) return true;
@@ -1956,7 +1998,7 @@ return 'ready-to-submit';
 const buttons = Array.from(document.querySelectorAll('button[type="submit"], button, [role="button"], input[type="submit"]'));
 const btn = buttons.find((node) => {
   const t = [node.innerText, node.textContent, node.value, node.getAttribute('aria-label')]
-    .filter(Boolean).join(' ').replace(/\s+/g, '').toLowerCase();
+    .filter(Boolean).join(' ').replace(/\\s+/g, '').toLowerCase();
   const testid = (node.getAttribute('data-testid') || '').toLowerCase();
   if (testid.includes('submit') || testid.includes('signup') || testid.includes('register') || testid.includes('continue')) return true;
   if (t.includes('完成注册') || t.includes('创建账户') || t.includes('signup') || t.includes('createaccount')) return true;
@@ -2008,7 +2050,7 @@ const notices = [];
 for (const selector of selectors) {
   for (const node of document.querySelectorAll(selector)) {
     if (!isVisible(node)) continue;
-    const text = String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+    const text = String(node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim();
     if (text && text.length <= 800) notices.push(text);
   }
 }
@@ -2028,7 +2070,7 @@ if (/\/sign-up(?:[/?#]|$)/i.test(location.pathname + location.search)) {
     const visibleButtons = Array.from(card.querySelectorAll('button')).filter(isVisible);
     const visibleInputs = Array.from(card.querySelectorAll('input, textarea, select')).filter(isVisible);
     if (description && mailButtons.length === 1 && visibleButtons.length === 1 && visibleInputs.length === 0) {
-      const text = String(card.innerText || card.textContent || '').replace(/\s+/g, ' ').trim();
+      const text = String(card.innerText || card.textContent || '').replace(/\\s+/g, ' ').trim();
       signature = {
         matched: true,
         name: 'existing-account-email-login-card',
@@ -2041,7 +2083,7 @@ if (/\/sign-up(?:[/?#]|$)/i.test(location.pathname + location.search)) {
 }
 const duplicateHeading = Array.from(document.querySelectorAll('h1, h2, h3, [role="heading"]')).find((node) => {
   if (!isVisible(node)) return false;
-  const text = String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const text = String(node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
   return text.includes('existing account found') || text.includes('账号已存在') || text.includes('账号已注册')
     || text.includes('找到现有账号') || text.includes('找到现有账户')
     || text.includes('账户已存在') || text.includes('账户已注册');
@@ -2050,14 +2092,14 @@ if (duplicateHeading) {
   let container = duplicateHeading.parentElement;
   let resultText = String(duplicateHeading.innerText || duplicateHeading.textContent || '').trim();
   for (let depth = 0; container && depth < 4; depth += 1, container = container.parentElement) {
-    const text = String(container.innerText || container.textContent || '').replace(/\s+/g, ' ').trim();
+    const text = String(container.innerText || container.textContent || '').replace(/\\s+/g, ' ').trim();
     if (text.length >= resultText.length && text.length <= 800) resultText = text;
     if (/login with email|使用邮箱登录/i.test(text) && text.length <= 800) break;
   }
   if (resultText) notices.unshift(resultText);
 }
 const body = String(document.body && (document.body.innerText || document.body.textContent) || '')
-  .replace(/\s+/g, ' ').trim().slice(0, 2400);
+  .replace(/\\s+/g, ' ').trim().slice(0, 2400);
 return { notices: Array.from(new Set(notices)).slice(0, 20), body, url: location.href, signature };
             """
         )
@@ -2144,7 +2186,7 @@ def wait_for_sso_cookie(timeout=55, log_callback=None, cancel_callback=None):
             return bool(
                 page.run_js(
                     r"""
-const t = ((document.body && document.body.innerText) || '').replace(/\s+/g, '');
+const t = ((document.body && document.body.innerText) || '').replace(/\\s+/g, '');
 const lower = t.toLowerCase();
 return t.includes('您正在登录') || t.includes('正在登录')
   || lower.includes('signingyouin') || lower.includes('signinginin')
@@ -2173,8 +2215,8 @@ const btn = nodes.find((n) => {
   if (!isVisible(n) || n.disabled) return false;
   const t = ((n.innerText || n.textContent || '') + ' '
     + (n.getAttribute('aria-label') || '') + ' '
-    + (n.getAttribute('href') || '')).replace(/\s+/g, ' ').trim().toLowerCase();
-  const compact = t.replace(/\s+/g, '');
+    + (n.getAttribute('href') || '')).replace(/\\s+/g, ' ').trim().toLowerCase();
+  const compact = t.replace(/\\s+/g, '');
   if (compact.includes('返回') || t.includes('back') || t.includes('return')) return false;
   return compact.includes('继续') || compact.includes('前往') || compact.includes('打开')
     || t.includes('continue') || t.includes('proceed') || t.includes('go to')
@@ -2202,7 +2244,7 @@ function isVisible(node) {
 const nodes = Array.from(document.querySelectorAll('button, a, [role="button"]'));
 const btn = nodes.find((n) => {
   if (!isVisible(n) || n.disabled) return false;
-  const t = ((n.innerText || n.textContent || '') + ' ' + (n.getAttribute('aria-label') || '')).replace(/\s+/g, '');
+  const t = ((n.innerText || n.textContent || '') + ' ' + (n.getAttribute('aria-label') || '')).replace(/\\s+/g, '');
   const lower = t.toLowerCase();
   return t.includes('返回') || lower.includes('back') || lower.includes('return');
 });
@@ -2349,7 +2391,7 @@ function isVisible(node) {
     return rect.width > 0 && rect.height > 0;
 }
 const titleHit = !!Array.from(document.querySelectorAll('h1,h2,div,span')).find((el) => {
-    const t = (el.textContent || '').replace(/\s+/g, '');
+    const t = (el.textContent || '').replace(/\\s+/g, '');
     const lower = t.toLowerCase();
     return t.includes('完成注册') || lower.includes('completeyoursignup') || lower.includes('completesignup');
 });
@@ -2371,13 +2413,13 @@ function buttonText(node) {
         node.getAttribute('value'),
         node.getAttribute('aria-label'),
         node.getAttribute('title'),
-    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
 }
 const buttons = Array.from(document.querySelectorAll('button[type="submit"], button, [role="button"], input[type="submit"]')).filter((node) => {
     return isVisible(node) && !node.disabled && node.getAttribute('aria-disabled') !== 'true';
 });
 const submitBtn = buttons.find((node) => {
-    const t = buttonText(node).replace(/\s+/g, '').toLowerCase();
+    const t = buttonText(node).replace(/\\s+/g, '').toLowerCase();
     const testid = (node.getAttribute('data-testid') || '').toLowerCase();
     if (testid.includes('submit') || testid.includes('signup') || testid.includes('register') || testid.includes('continue')) return true;
     if (t.includes('完成注册') || t.includes('创建账户') || t.includes('signup') || t.includes('createaccount')) return true;
@@ -2573,7 +2615,7 @@ function buttonText(node) {
   return [
     node.innerText, node.textContent, node.getAttribute('value'),
     node.getAttribute('aria-label'), node.getAttribute('title'),
-  ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
 }
 const url = String(location.href || '');
 const bodyText = String(document.body && document.body.innerText || '').slice(0, 4000);
@@ -2590,7 +2632,7 @@ if (url.includes('sign-in') || url.includes('sign-up')) {
 const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], a')).filter(isVisible);
 function findBtn(preds) {
   for (const node of buttons) {
-    const t = buttonText(node).replace(/\s+/g, '').toLowerCase();
+    const t = buttonText(node).replace(/\\s+/g, '').toLowerCase();
     for (const p of preds) {
       if (t.includes(p)) return node;
     }
@@ -2603,7 +2645,7 @@ for (const inp of inputs) {
   const name = String(inp.getAttribute('name') || inp.getAttribute('id') || '').toLowerCase();
   const ph = String(inp.getAttribute('placeholder') || '').toLowerCase();
   if (name.includes('user') || name.includes('code') || ph.includes('code') || ph.includes('代码')) {
-    if (userCode && String(inp.value || '').replace(/\s+/g, '') !== userCode.replace(/\s+/g, '')) {
+    if (userCode && String(inp.value || '').replace(/\\s+/g, '') !== userCode.replace(/\\s+/g, '')) {
       inp.focus();
       inp.value = userCode;
       inp.dispatchEvent(new Event('input', {bubbles: true}));
